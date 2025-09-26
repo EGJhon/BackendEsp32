@@ -10,21 +10,31 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(bodyParser.json());
 
+// Variable en memoria (no se guarda en BD)
+let ultimoNivelAgua = null;
+
 // Ruta de prueba
 app.get("/", (req, res) => {
   res.send("🌱 API Sensores funcionando...");
 });
-
 
 // --------------------
 // 1. Guardar datos del ESP32
 // --------------------
 app.post("/api/sensores", async (req, res) => {
   try {
-    const { planta_id, temperatura, humedad_suelo } = req.body;
+    const { planta_id, temperatura, humedad_suelo, nivel_agua } = req.body;
 
     if (!planta_id || temperatura === undefined || humedad_suelo === undefined) {
       return res.status(400).json({ error: "Faltan datos" });
+    }
+
+    // 👇 Guardamos el nivel de agua en memoria (no en la BD)
+    if (nivel_agua !== undefined) {
+      ultimoNivelAgua = {
+        nivel_agua,
+        fecha: new Date()
+      };
     }
 
     const query = `
@@ -35,13 +45,12 @@ app.post("/api/sensores", async (req, res) => {
     const values = [planta_id, temperatura, humedad_suelo];
     const result = await pool.query(query, values);
 
-    res.json(result.rows[0]); // devolvemos solo la fila insertada
+    res.json(result.rows[0]);
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Error en el servidor" });
   }
 });
-
 
 // --------------------
 // 2. Consultar histórico (últimos 20 registros)
@@ -58,7 +67,6 @@ app.get("/api/sensores", async (req, res) => {
   }
 });
 
-
 // --------------------
 // 3. Último dato
 // --------------------
@@ -73,7 +81,6 @@ app.get("/api/sensores/ultimo", async (req, res) => {
     res.status(500).json({ error: "Error en la consulta" });
   }
 });
-
 
 // --------------------
 // 4. Histórico por planta
@@ -92,6 +99,15 @@ app.get("/api/sensores/planta/:id", async (req, res) => {
   }
 });
 
+// --------------------
+// 5. Último nivel de agua (solo memoria)
+// --------------------
+app.get("/api/sensores/nivel-agua", (req, res) => {
+  if (!ultimoNivelAgua) {
+    return res.json({ nivel_agua: null, mensaje: "Aún no se ha recibido nivel de agua" });
+  }
+  res.json(ultimoNivelAgua);
+});
 
 // --------------------
 // Iniciar servidor
