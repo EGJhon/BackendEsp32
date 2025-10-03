@@ -141,6 +141,8 @@ app.post("/api/plantas", async (req, res) => {
     res.status(500).json({ error: "Error al registrar planta" });
   }
 });
+
+
 // --------------------
 // Iniciar servidor
 // --------------------
