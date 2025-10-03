@@ -114,7 +114,7 @@ app.get("/api/plantas/:correo", async (req, res) => {
   try {
     const { correo } = req.params;
     const result = await pool.query(
-      "SELECT * FROM plantas WHERE correo_usuario = = $1 ORDER BY fecha_registro DESC",
+      "SELECT * FROM plantas WHERE correo_usuario = $1 ORDER BY fecha_registro DESC",
       [correo]
     );
     res.json(result.rows);
