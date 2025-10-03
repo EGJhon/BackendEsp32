@@ -109,9 +109,42 @@ app.get("/api/sensores/nivel-agua", (req, res) => {
   res.json(ultimoNivelAgua);
 });
 
+// 📌 Listar plantas de un usuario por correo
+app.get("/api/plantas/:correo", async (req, res) => {
+  try {
+    const { correo } = req.params;
+    const result = await pool.query(
+      "SELECT * FROM plantas WHERE correo_usuario = $1 ORDER BY fecha_registro DESC",
+      [correo]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Error obteniendo plantas del usuario" });
+  }
+});
+
+// 📌 Agregar nueva planta
+app.post("/api/plantas", async (req, res) => {
+  try {
+    const { nombre, ubicacion, id_tipo, correo_usuario } = req.body;
+    if (!nombre || !id_tipo || !correo_usuario) {
+      return res.status(400).json({ error: "Datos incompletos" });
+    }
+    const result = await pool.query(
+      "INSERT INTO plantas (nombre, fecha_registro, ubicacion, id_tipo, correo_usuario) VALUES ($1, NOW(), $2, $3, $4) RETURNING *",
+      [nombre, ubicacion || "", id_tipo, correo_usuario]
+    );
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Error al registrar planta" });
+  }
+});
 // --------------------
 // Iniciar servidor
 // --------------------
 app.listen(PORT, () => {
   console.log(`🚀 Servidor escuchando en http://localhost:${PORT}`);
 });
+
