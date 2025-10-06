@@ -26,14 +26,6 @@ app.post("/api/sensores", async (req, res) => {
       return res.status(400).json({ error: "Faltan datos" });
     }
 
-    // Guardamos en memoria el nivel de agua más reciente
-    if (nivel_agua !== undefined) {
-      ultimoNivelAgua = {
-        nivel_agua,
-        fecha: new Date()
-      };
-    }
-
     const query = `
       INSERT INTO lecturas (planta_id, temperatura, humedad, nivel_agua, agua_consumida, fecha)
       VALUES ($1, $2, $3, $4, $5, NOW())
@@ -99,11 +91,24 @@ app.get("/api/sensores/planta/:id", async (req, res) => {
 // --------------------
 // 5. Último nivel de agua (solo memoria)
 // --------------------
-app.get("/api/sensores/nivel-agua", (req, res) => {
-  if (!ultimoNivelAgua) {
-    return res.json({ nivel_agua: null, mensaje: "Aún no se ha recibido nivel de agua" });
+app.get("/api/sensores/nivel-agua/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      "SELECT nivel_agua FROM lecturas WHERE planta_id = $1 ORDER BY fecha DESC LIMIT 1",
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      // No hay registros todavía
+      return res.json({ nivel_agua: null, mensaje: "Aún no se ha recibido nivel de agua" });
+    }
+
+    res.json({ nivel_agua: result.rows[0].nivel_agua, mensaje: "Último nivel obtenido correctamente" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Error en la consulta por nivel de agua" });
   }
-  res.json(ultimoNivelAgua);
 });
 
 //  Listar plantas de un usuario por correo
