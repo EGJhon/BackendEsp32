@@ -222,7 +222,75 @@ app.post("/api/plantas", async (req, res) => {
     res.status(500).json({ error: "Error al registrar planta" });
   }
 });
+// Pega esto en tu archivo de servidor (ej. index.js)
+// junto con tus otras rutas GET y POST.
 
+app.get("/api/reporte/planta/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // 1. Reporte de 24 horas (Temp y Hum)
+    const query24h = `
+      SELECT
+        AVG(temperatura) AS temp_avg,
+        MAX(temperatura) AS temp_max,
+        MIN(temperatura) AS temp_min,
+        AVG(humedad) AS hum_avg,
+        MAX(humedad) AS hum_max,
+        MIN(humedad) AS hum_min
+      FROM lecturas
+      WHERE planta_id = $1 AND fecha >= NOW() - INTERVAL '24 hours'
+    `;
+    const res24h = await pool.query(query24h, [id]);
+
+    // 2. Reporte de 7 días (Consumo de agua)
+    const query7d = `
+      SELECT
+        SUM(agua_consumida) AS agua_total
+      FROM lecturas
+      WHERE planta_id = $1 AND fecha >= NOW() - INTERVAL '7 days'
+    `;
+    const res7d = await pool.query(query7d, [id]);
+
+    // Combinamos los resultados en un solo objeto
+    const reporte = {
+      ...res24h.rows[0],
+      ...res7d.rows[0]
+    };
+
+    res.json(reporte);
+
+  } catch (error) {
+    console.error("Error en GET /api/reporte/planta/:id", error);
+    res.status(500).json({ error: "Error en el servidor al generar reporte" });
+  }
+});
+app.get("/api/planta/tipo/:id", async (req, res) => {
+  try {
+    const { id } = req.params; // Este es el ID de la planta (de la tabla 'plantas')
+
+    // Consulta SQL que une 'plantas' con 'tipo_planta'
+    const query = `
+      SELECT T.temp_min, T.temp_max, T.hum_min, T.hum_max
+      FROM tipo_planta T
+      JOIN plantas P ON T.id = P.id_tipo
+      WHERE P.id = $1;
+    `;
+    
+    const result = await pool.query(query, [id]);
+
+    if (result.rows.length === 0) {
+      // Si no encuentra, devuelve valores 'nulos' para no romper el frontend
+      return res.json({ temp_min: null, temp_max: null, hum_min: null, hum_max: null });
+    }
+
+    res.json(result.rows[0]); // Devuelve { temp_min: 15, temp_max: 30, ... }
+
+  } catch (error) {
+    console.error("Error en GET /api/planta/tipo/:id", error);
+    res.status(500).json({ error: "Error en el servidor" });
+  }
+});
 
 // --------------------
 // Iniciar servidor
