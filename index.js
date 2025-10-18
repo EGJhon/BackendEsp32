@@ -2,6 +2,7 @@ import express from "express";
 import bodyParser from "body-parser";
 import cors from "cors";
 import pool from "./db.js"; // conexión a PostgreSQL
+import mqtt from "mqtt";     // --- NUEVO ---
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -10,12 +11,90 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(bodyParser.json());
 
-// Variable en memoria (no se guarda en BD)
-let ultimoNivelAgua = null;
+// --- NUEVO: CONFIGURACIÓN MQTT ---
+const MQTT_BROKER = "762358bc25e4449fb40ac5b6645ff3dc.s1.eu.hivemq.cloud";
+const MQTT_PORT = 8883;
+const MQTT_USER = "JhonE";     // <--- RELLENA ESTO
+const MQTT_PASSWORD = "192837465Jhon";  // <--- RELLENA ESTO
+const MQTT_TOPIC = "sensores/planta/datos"; // Mismo topic que en el ESP32
+
+// Opciones de conexión
+const mqttOptions = {
+  host: MQTT_BROKER,
+  port: MQTT_PORT,
+  protocol: 'mqtts', // 'mqtts' para conexiones seguras TLS (puerto 8883)
+  username: MQTT_USER,
+  password: MQTT_PASSWORD
+};
+
+// 1. Conectar al Broker MQTT
+console.log("🚀 Intentando conectar al Broker MQTT...");
+const client = mqtt.connect(mqttOptions);
+
+// 2. Evento 'connect' (cuando se conecta)
+client.on('connect', () => {
+  console.log('✅ Conectado exitosamente al Broker MQTT');
+  
+  // Suscribirse al topic
+  client.subscribe(MQTT_TOPIC, (err) => {
+    if (!err) {
+      console.log(`👂 Suscrito al topic: ${MQTT_TOPIC}`);
+    } else {
+      console.error('Error al suscribirse:', err);
+    }
+  });
+});
+
+// 3. Evento 'message' (cuando llega un mensaje)
+//    Esta es la parte MÁS IMPORTANTE
+client.on('message', async (topic, payload) => {
+  // El payload llega como un Buffer, lo convertimos a String
+  const messageString = payload.toString();
+  console.log(`[MQTT] Mensaje recibido en ${topic}: ${messageString}`);
+
+  try {
+    // Convertimos el string (que es un JSON) a un objeto
+    const datos = JSON.parse(messageString);
+
+    const { planta_id, temperatura, humedad, nivel_agua, agua_consumida } = datos;
+
+    // --- Esta es la MISMA lógica que tu ruta POST ---
+    const query = `
+      INSERT INTO lecturas (planta_id, temperatura, humedad, nivel_agua, agua_consumida, fecha)
+      VALUES ($1, $2, $3, $4, $5, NOW())
+      RETURNING *;
+    `;
+    const values = [planta_id, temperatura, humedad, nivel_agua || null, agua_consumida || null];
+    
+    // Ejecutamos la consulta
+    const result = await pool.query(query, values);
+    console.log('[MQTT] Datos guardados en la BD:', result.rows[0]);
+
+  } catch (error) {
+    console.error("[MQTT] Error al procesar el mensaje o guardar en BD:", error);
+  }
+});
+
+// 4. Eventos de error o reconexión (opcional pero recomendado)
+client.on('error', (err) => {
+  console.error('Error de MQTT:', err);
+});
+
+client.on('reconnect', () => {
+  console.log('Reconectando al Broker MQTT...');
+});
+// --- FIN DE LA SECCIÓN MQTT ---
+
+
+// ===================================
+// TUS RUTAS HTTP (NO CAMBIAN NADA)
+// ===================================
+// Tu API seguirá funcionando exactamente igual que antes.
+// Puedes usar POST para pruebas y MQTT para el ESP32.
 
 // Ruta de prueba
 app.get("/", (req, res) => {
-  res.send("🌱 API Sensores funcionando...");
+  res.send("🌱 API Sensores funcionando (ahora también con MQTT)...");
 });
 
 app.post("/api/sensores", async (req, res) => {
