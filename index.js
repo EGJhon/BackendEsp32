@@ -292,6 +292,92 @@ app.get("/api/planta/tipo/:id", async (req, res) => {
   }
 });
 
+// ===================================
+// RUTAS PARA REPORTES INTELIGENTES
+// ===================================
+
+// REPORTE 1: Eficiencia (Puntaje de Bienestar)
+app.get("/api/reporte/eficiencia/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const query = `
+      SELECT
+        COUNT(CASE WHEN T.ideal = 1 THEN 1 END) AS lecturas_ideales,
+        COUNT(*) AS lecturas_totales,
+        (COUNT(CASE WHEN T.ideal = 1 THEN 1 END) * 100.0 / COUNT(*)) AS porcentaje_eficiencia
+      FROM (
+        SELECT
+          CASE
+            WHEN L.temperatura BETWEEN TP.temp_min AND TP.temp_max
+             AND L.humedad BETWEEN TP.hum_min AND TP.hum_max
+            THEN 1
+            ELSE 0
+          END AS ideal
+        FROM lecturas L
+        JOIN plantas P ON L.planta_id = P.id
+        JOIN tipo_planta TP ON P.id_tipo = TP.id
+        WHERE L.planta_id = $1 AND L.fecha >= NOW() - INTERVAL '7 days'
+      ) T;
+    `;
+    const result = await pool.query(query, [id]);
+    res.json(result.rows[0]);
+
+  } catch (error) {
+    console.error("Error en GET /api/reporte/eficiencia/:id", error);
+    res.status(500).json({ error: "Error en el servidor" });
+  }
+});
+
+// REPORTE 2: Diagnóstico de Estrés
+app.get("/api/reporte/estres/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const query = `
+      SELECT
+        SUM(CASE WHEN L.temperatura > TP.temp_max THEN 1 ELSE 0 END) AS estres_calor,
+        SUM(CASE WHEN L.temperatura < TP.temp_min THEN 1 ELSE 0 END) AS estres_frio,
+        SUM(CASE WHEN L.humedad < TP.hum_min THEN 1 ELSE 0 END) AS estres_sequedad,
+        SUM(CASE WHEN L.humedad > TP.hum_max THEN 1 ELSE 0 END) AS estres_exceso_agua
+      FROM lecturas L
+      JOIN plantas P ON L.planta_id = P.id
+      JOIN tipo_planta TP ON P.id_tipo = TP.id
+      WHERE L.planta_id = $1 AND L.fecha >= NOW() - INTERVAL '7 days';
+    `;
+    const result = await pool.query(query, [id]);
+    res.json(result.rows[0]);
+
+  } catch (error) {
+    console.error("Error en GET /api/reporte/estres/:id", error);
+    res.status(500).json({ error: "Error en el servidor" });
+  }
+});
+
+// REPORTE 3: Reporte Hídrico (Consumo)
+app.get("/api/reporte/agua/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const query = `
+      SELECT
+        SUM(agua_consumida) AS consumo_total_mes,
+        AVG(consumo_diario) AS consumo_promedio_diario
+      FROM (
+        SELECT
+          DATE(fecha) AS dia,
+          SUM(agua_consumida) AS consumo_diario
+        FROM lecturas
+        WHERE planta_id = $1 AND fecha >= NOW() - INTERVAL '30 days'
+        GROUP BY dia
+      ) T;
+    `;
+    const result = await pool.query(query, [id]);
+    res.json(result.rows[0]);
+
+  } catch (error) {
+    console.error("Error en GET /api/reporte/agua/:id", error);
+    res.status(500).json({ error: "Error en el servidor" });
+  }
+});
+
 // --------------------
 // Iniciar servidor
 // --------------------
