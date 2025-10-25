@@ -358,7 +358,7 @@ app.get("/api/reporte/agua/:id", async (req, res) => {
     const { id } = req.params;
     const query = `
       SELECT
-        SUM(agua_consumida) AS consumo_total_mes,
+        SUM(consumo_diario) AS consumo_total_mes,
         AVG(consumo_diario) AS consumo_promedio_diario
       FROM (
         SELECT
