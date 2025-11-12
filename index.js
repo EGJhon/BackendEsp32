@@ -351,6 +351,20 @@ app.get("/api/reporte/estres/:id", async (req, res) => {
     res.status(500).json({ error: "Error en el servidor" });
   }
 });
+// ===================================
+// NUEVA RUTA: OBTENER TIPOS DE PLANTA
+// ===================================
+app.get("/api/tipos-planta", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM tipo_planta ORDER BY nombre"
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error("Error en GET /api/tipos-planta:", error);
+    res.status(500).json({ error: "Error en la consulta" });
+  }
+});
 
 // REPORTE 3: Reporte Hídrico (Consumo)
 app.get("/api/reporte/agua/:id", async (req, res) => {
