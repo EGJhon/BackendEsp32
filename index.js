@@ -4,7 +4,15 @@ import cors from "cors";
 import pool from "./db.js"; // conexión a PostgreSQL
 import mqtt from "mqtt";
 import admin from "firebase-admin"; // <-- NUEVO
-import serviceAccount from "./serviceAccountKey.json" assert { type: "json" }; // <-- NUEVO
+// --- Inicio del bloque de reemplazo ---
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const serviceAccount = JSON.parse(fs.readFileSync(join(__dirname, 'serviceAccountKey.json'), 'utf8'));
+// --- Fin del bloque de reemplazo ---
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -12,7 +20,7 @@ const PORT = process.env.PORT || 3000;
 // ===================================
 // CONSTANTE DE ADMINISTRADOR
 // ===================================
-const ADMIN_EMAIL = "tu_correo_admin@gmail.com"; // <--- ¡CAMBIA ESTO!
+const ADMIN_EMAIL = "jegdota@gmail.com"; // <--- ¡CAMBIA ESTO!
 
 // Middlewares
 app.use(cors());
