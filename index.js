@@ -292,12 +292,14 @@ userRouter.get("/planta/tipo/:id", async (req, res) => {
 });
 userRouter.get("/reporte/eficiencia/:id", async (req, res) => { 
   try {
-      const { id } = req.params;
+    const { id } = req.params;
+
+    // Función helper para calcular el % en un rango de días
+    const getEficiencia = async (intervalo) => {
       const query = `
         SELECT
-          COUNT(CASE WHEN T.ideal = 1 THEN 1 END) AS lecturas_ideales,
-          COUNT(*) AS lecturas_totales,
-          (COUNT(CASE WHEN T.ideal = 1 THEN 1 END) * 100.0 / COUNT(*)) AS porcentaje_eficiencia
+          -- Usamos (COUNT(*)+0.0001) para evitar dividir por cero si no hay datos
+          (COUNT(CASE WHEN T.ideal = 1 THEN 1 END) * 100.0 / (COUNT(*)+0.0001)) AS porcentaje
         FROM (
           SELECT
             CASE
@@ -309,16 +311,33 @@ userRouter.get("/reporte/eficiencia/:id", async (req, res) => {
           FROM lecturas L
           JOIN plantas P ON L.planta_id = P.id
           JOIN tipo_planta TP ON P.id_tipo = TP.id
-          WHERE L.planta_id = $1 AND L.fecha >= NOW() - INTERVAL '7 days'
+          WHERE L.planta_id = $1 AND ${intervalo}
         ) T;
       `;
       const result = await pool.query(query, [id]);
-      res.json(result.rows[0]);
-  
-    } catch (error) {
-      console.error("Error en GET /api/reporte/eficiencia/:id", error);
-      res.status(500).json({ error: "Error en el servidor" });
-    }
+      return parseFloat(result.rows[0].porcentaje || 0);
+    };
+
+    // 1. Calcular el porcentaje de la semana actual
+    const porcentajeActual = await getEficiencia(
+      "L.fecha >= NOW() - INTERVAL '7 days'"
+    );
+
+    // 2. Calcular el porcentaje de la semana anterior
+    const porcentajeAnterior = await getEficiencia(
+      "L.fecha >= NOW() - INTERVAL '14 days' AND L.fecha < NOW() - INTERVAL '7 days'"
+    );
+    
+    // 3. Devolver ambos valores con los NOMBRES CORRECTOS
+    res.json({
+      porcentaje_actual: porcentajeActual,
+      porcentaje_anterior: porcentajeAnterior
+    });
+
+  } catch (error) {
+    console.error("Error en GET /reporte/eficiencia/:id", error);
+    res.status(500).json({ error: "Error en el servidor" });
+  }
 });
 userRouter.get("/reporte/estres/:id", async (req, res) => { 
   try {
