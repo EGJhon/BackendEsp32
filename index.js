@@ -298,7 +298,6 @@ userRouter.get("/reporte/eficiencia/:id", async (req, res) => {
     const getEficiencia = async (intervalo) => {
       const query = `
         SELECT
-          -- Usamos (COUNT(*)+0.0001) para evitar dividir por cero si no hay datos
           (COUNT(CASE WHEN T.ideal = 1 THEN 1 END) * 100.0 / (COUNT(*)+0.0001)) AS porcentaje
         FROM (
           SELECT
@@ -328,7 +327,7 @@ userRouter.get("/reporte/eficiencia/:id", async (req, res) => {
       "L.fecha >= NOW() - INTERVAL '14 days' AND L.fecha < NOW() - INTERVAL '7 days'"
     );
     
-    // 3. Devolver ambos valores con los NOMBRES CORRECTOS
+    // 3. Devolver ambos valores
     res.json({
       porcentaje_actual: porcentajeActual,
       porcentaje_anterior: porcentajeAnterior
