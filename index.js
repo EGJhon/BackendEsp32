@@ -111,30 +111,30 @@ const MQTT_TOPIC_DATOS = "sensores/planta/datos"; // ESP32 publica aquí
 const MQTT_TOPIC_COMANDOS = "planta/comandos";   // ESP32 escucha aquí
 
 const mqttOptions = { 
-  host: MQTT_BROKER,
-  port: MQTT_PORT,
-  protocol: 'mqtts',
-  username: MQTT_USER,
-  password: MQTT_PASSWORD
+ host: MQTT_BROKER,
+ port: MQTT_PORT,
+ protocol: 'mqtts',
+ username: MQTT_USER,
+ password: MQTT_PASSWORD
 };
 const client = mqtt.connect(mqttOptions);
 
 client.on('connect', () => {
-  console.log('✅ Conectado exitosamente al Broker MQTT');
-  // El backend ahora SÓLO escucha el topic de datos
-  client.subscribe(MQTT_TOPIC_DATOS, (err) => {
-    if (!err) {
-      console.log(`👂 Suscrito al topic: ${MQTT_TOPIC_DATOS}`);
-    } else {
-      console.error('Error al suscribirse:', err);
-    }
-  });
+ console.log('✅ Conectado exitosamente al Broker MQTT');
+ // El backend ahora SÓLO escucha el topic de datos
+ client.subscribe(MQTT_TOPIC_DATOS, (err) => {
+  if (!err) {
+   console.log(`👂 Suscrito al topic: ${MQTT_TOPIC_DATOS}`);
+  } else {
+   console.error('Error al suscribirse:', err);
+  }
+ });
 });
 
 // ¡¡ESTA ES LA LÓGICA PRINCIPAL!!
 client.on('message', async (topic, payload) => { 
-  const messageString = payload.toString();
-  console.log(`[MQTT] Mensaje recibido en ${topic}: ${messageString}`);
+ const messageString = payload.toString();
+ console.log(`[MQTT] Mensaje recibido en ${topic}: ${messageString}`);
   
   let datos;
   try {
@@ -417,53 +417,73 @@ userRouter.get("/planta/tipo/:id", async (req, res) => {
       res.status(500).json({ error: "Error en el servidor" });
     }
 });
+// --- ¡¡RUTA MODIFICADA!! ---
 userRouter.get("/reporte/eficiencia/:id", async (req, res) => { 
-  try {
-    const { id } = req.params;
+ try {
+  const { id } = req.params;
+  const getEficiencia = async (intervalo) => {
+   const query = `
+    SELECT (COUNT(CASE WHEN T.ideal = 1 THEN 1 END) * 100.0 / (COUNT(*)+0.0001)) AS porcentaje
+    FROM (
+     SELECT CASE
+      WHEN L.temperatura BETWEEN TP.temp_min AND TP.temp_max
+       AND L.humedad BETWEEN TP.hum_min AND TP.hum_max
+      THEN 1 ELSE 0 END AS ideal
+     FROM lecturas L
+     JOIN plantas P ON L.planta_id = P.id
+     JOIN tipo_planta TP ON P.id_tipo = TP.id
+     WHERE L.planta_id = $1 AND ${intervalo}
+    ) T;
+   `;
+   const result = await pool.query(query, [id]);
+   return parseFloat(result.rows[0].porcentaje || 0);
+  };
 
-    // Función helper para calcular el % en un rango de días
-    const getEficiencia = async (intervalo) => {
-      const query = `
-        SELECT
-          (COUNT(CASE WHEN T.ideal = 1 THEN 1 END) * 100.0 / (COUNT(*)+0.0001)) AS porcentaje
-        FROM (
-          SELECT
-            CASE
-              WHEN L.temperatura BETWEEN TP.temp_min AND TP.temp_max
-               AND L.humedad BETWEEN TP.hum_min AND TP.hum_max
-              THEN 1
-              ELSE 0
-            END AS ideal
-          FROM lecturas L
-          JOIN plantas P ON L.planta_id = P.id
-          JOIN tipo_planta TP ON P.id_tipo = TP.id
-          WHERE L.planta_id = $1 AND ${intervalo}
-        ) T;
-      `;
-      const result = await pool.query(query, [id]);
-      return parseFloat(result.rows[0].porcentaje || 0);
-    };
+  // 1. Porcentaje Actual y Anterior (sin cambios)
+  const porcentajeActual = await getEficiencia("L.fecha >= NOW() - INTERVAL '7 days'");
+  const porcentajeAnterior = await getEficiencia("L.fecha >= NOW() - INTERVAL '14 days' AND L.fecha < NOW() - INTERVAL '7 days'");
+  
+  // --- 2. ¡NUEVA QUERY! Tendencia Diaria para el gráfico ---
+  const queryTrend = `
+   WITH dias AS (
+    SELECT generate_series(
+     (NOW() - INTERVAL '6 days')::date,
+     NOW()::date,
+     '1 day'::interval
+    ) AS dia
+   ),
+   datos AS (
+    SELECT
+     DATE(L.fecha) AS dia,
+     (COUNT(CASE WHEN L.temperatura BETWEEN TP.temp_min AND TP.temp_max
+      AND L.humedad BETWEEN TP.hum_min AND TP.hum_max
+      THEN 1 END) * 100.0 / (COUNT(*)+0.0001)) AS porcentaje
+    FROM lecturas L
+    JOIN plantas P ON L.planta_id = P.id
+    JOIN tipo_planta TP ON P.id_tipo = TP.id
+    WHERE L.planta_id = $1 AND L.fecha >= NOW() - INTERVAL '7 days'
+    GROUP BY DATE(L.fecha)
+   )
+   SELECT
+    TO_CHAR(dias.dia, 'YYYY-MM-DD') AS dia,
+    COALESCE(datos.porcentaje, 0) AS porcentaje
+   FROM dias
+   LEFT JOIN datos ON dias.dia = datos.dia
+   ORDER BY dias.dia;
+  `;
+  const trendResult = await pool.query(queryTrend, [id]);
+  
+  // 3. Devolver ambos valores
+  res.json({
+   porcentaje_actual: porcentajeActual,
+   porcentaje_anterior: porcentajeAnterior,
+   daily_trend: trendResult.rows // <-- ¡NUEVO DATO!
+  });
 
-    // 1. Calcular el porcentaje de la semana actual
-    const porcentajeActual = await getEficiencia(
-      "L.fecha >= NOW() - INTERVAL '7 days'"
-    );
-
-    // 2. Calcular el porcentaje de la semana anterior
-    const porcentajeAnterior = await getEficiencia(
-      "L.fecha >= NOW() - INTERVAL '14 days' AND L.fecha < NOW() - INTERVAL '7 days'"
-    );
-    
-    // 3. Devolver ambos valores
-    res.json({
-      porcentaje_actual: porcentajeActual,
-      porcentaje_anterior: porcentajeAnterior
-    });
-
-  } catch (error) {
-    console.error("Error en GET /reporte/eficiencia/:id", error);
-    res.status(500).json({ error: "Error en el servidor" });
-  }
+ } catch (error) {
+  console.error("Error en GET /reporte/eficiencia/:id", error);
+  res.status(500).json({ error: "Error en el servidor" });
+ }
 });
 userRouter.get("/reporte/estres/:id", async (req, res) => { 
   try {
@@ -487,30 +507,64 @@ userRouter.get("/reporte/estres/:id", async (req, res) => {
       res.status(500).json({ error: "Error en el servidor" });
     }
 });
+// --- ¡¡RUTA MODIFICADA!! ---
 userRouter.get("/reporte/agua/:id", async (req, res) => { 
-  try {
-      const { id } = req.params;
-      const query = `
-        SELECT
-          SUM(consumo_diario) AS consumo_total_mes,
-          AVG(consumo_diario) AS consumo_promedio_diario
-        FROM (
-          SELECT
-            DATE(fecha) AS dia,
-            SUM(agua_consumida) AS consumo_diario
-          FROM lecturas
-          WHERE planta_id = $1 AND fecha >= NOW() - INTERVAL '30 days'
-          GROUP BY dia
-        ) T;
-      `;
-      const result = await pool.query(query, [id]);
-      res.json(result.rows[0]);
-  
-    } catch (error) {
-      console.error("Error en GET /api/reporte/agua/:id", error);
-      res.status(500).json({ error: "Error en el servidor" });
-    }
- });
+ try {
+   const { id } = req.params;
+   
+   // 1. Query para las tarjetas (sin cambios)
+   const queryCards = `
+    SELECT
+     SUM(consumo_diario) AS consumo_total_mes,
+     AVG(consumo_diario) AS consumo_promedio_diario
+    FROM (
+     SELECT
+      DATE(fecha) AS dia,
+      SUM(agua_consumida) AS consumo_diario
+     FROM lecturas
+     WHERE planta_id = $1 AND fecha >= NOW() - INTERVAL '30 days'
+     GROUP BY dia
+    ) T;
+   `;
+   const cardsResult = await pool.query(queryCards, [id]);
+
+   // --- 2. ¡NUEVA QUERY! Consumo diario para el gráfico (últimos 7 días) ---
+   const queryDaily = `
+    WITH dias AS (
+     SELECT generate_series(
+      (NOW() - INTERVAL '6 days')::date,
+      NOW()::date,
+      '1 day'::interval
+     ) AS dia
+    ),
+    datos AS (
+     SELECT 
+      DATE(fecha) AS dia,
+      SUM(agua_consumida) AS consumo
+     FROM lecturas
+     WHERE planta_id = $1 AND fecha >= NOW() - INTERVAL '7 days'
+     GROUP BY DATE(fecha)
+    )
+    SELECT 
+     TO_CHAR(dias.dia, 'YYYY-MM-DD') AS dia,
+     COALESCE(datos.consumo, 0) AS consumo
+    FROM dias
+    LEFT JOIN datos ON dias.dia = datos.dia
+    ORDER BY dias.dia;
+   `;
+   const dailyResult = await pool.query(queryDaily, [id]);
+   
+   // 3. Combinar y enviar
+   res.json({
+    ...cardsResult.rows[0],
+    daily_consumption: dailyResult.rows // <-- ¡NUEVO DATO!
+   });
+ 
+ } catch (error) {
+   console.error("Error en GET /api/reporte/agua/:id", error);
+   res.status(500).json({ error: "Error en el servidor" });
+  }
+});
 // (Añadimos aquí las rutas de sensores que faltaban)
 userRouter.get("/sensores", async (req, res) => { 
   try {
@@ -540,33 +594,33 @@ userRouter.get("/sensores/ultimo", async (req, res) => {
 // RUTA DE PREDICCIÓN DE IA (NUEVO)
 // ===================================
 userRouter.post('/ia/predecir', async (req, res) => {
-  // iaModel e iaStats se cargan más abajo
-  if (!iaModel || !iaStats) { 
-    return res.status(500).send({ error: 'Modelo no está listo' });
-  }
+ // iaModel e iaStats se cargan más abajo
+ if (!iaModel || !iaStats) { 
+  return res.status(500).send({ error: 'Modelo no está listo' });
+ }
 
-  // 1. Recibir las 9 variables crudas
-  const rawInput = req.body.input; // [temp, hum, sin, cos, ...]
+ // 1. Recibir las 9 variables crudas
+ const rawInput = req.body.input; // [temp, hum, sin, cos, ...]
 
   if (!rawInput || rawInput.length !== 9) {
     return res.status(400).send({ error: 'Se esperaban 9 valores en el array "input"' });
   }
 
 
-  // 2. Normalizar (Usando los stats cargados)
+ // 2. Normalizar (Usando los stats cargados)
   const { IA_MEAN, IA_STD } = iaStats;
-  const normalizedInput = rawInput.map((val, i) => {
+ const normalizedInput = rawInput.map((val, i) => {
     // Evitar división por cero si la desviación es 0
     if (IA_STD[i] === 0 || isNaN(IA_STD[i])) return val - IA_MEAN[i];
     return (val - IA_MEAN[i]) / IA_STD[i];
   });
 
-  // 3. Predecir
-  const prediction = iaModel.predict([normalizedInput]);
-  const humedadFutura = prediction[0];
+ // 3. Predecir
+ const prediction = iaModel.predict([normalizedInput]);
+ const humedadFutura = prediction[0];
 
-  // 4. Devolver solo el resultado
-  res.json({ prediccion: humedadFutura });
+ // 4. Devolver solo el resultado
+ res.json({ prediccion: humedadFutura });
 });
 
 
@@ -697,25 +751,25 @@ let iaStats = null; // <--- Para guardar MEAN y STD
 
 // Cargar el modelo UNA SOLA VEZ cuando el servidor inicia
 async function loadModel() {
-  try {
-    // 1. Cargar el JSON del modelo
-    const modelPath = join(__dirname, 'rf_model.json'); 
-    console.log(`Cargando modelo desde: ${modelPath}`);
-    const modelJSON = fs.readFileSync(modelPath, 'utf8');
-    
-    // 2. Cargar las estadísticas (Mean/Std)
-    const statsPath = join(__dirname, 'rf_stats.json');
-    console.log(`Cargando stats desde: ${statsPath}`);
-    const statsJSON = fs.readFileSync(statsPath, 'utf8'); // <-- "G" eliminado
-    iaStats = JSON.parse(statsJSON); // Carga { IA_MEAN, IA_STD } // <-- "section." eliminado
+ try {
+  // 1. Cargar el JSON del modelo
+  const modelPath = join(__dirname, 'rf_model.json'); 
+  console.log(`Cargando modelo desde: ${modelPath}`);
+  const modelJSON = fs.readFileSync(modelPath, 'utf8');
+  
+  // 2. Cargar las estadísticas (Mean/Std)
+  const statsPath = join(__dirname, 'rf_stats.json');
+  console.log(`Cargando stats desde: ${statsPath}`);
+  const statsJSON = fs.readFileSync(statsPath, 'utf8'); // <-- "G" eliminado
+  iaStats = JSON.parse(statsJSON); // Carga { IA_MEAN, IA_STD } // <-- "section." eliminado
 
-    // 3. Re-crear el modelo desde el JSON
-    iaModel = RandomForestRegression.load(JSON.parse(modelJSON));
-    
-    console.log('✅ Modelo de IA (Random Forest) cargado en el backend');
-  } catch (err) {
-    console.error('❌ Error cargando modelo o stats en backend:', err);
-  } // <-- "A" eliminado
+  // 3. Re-crear el modelo desde el JSON
+  iaModel = RandomForestRegression.load(JSON.parse(modelJSON));
+  
+  console.log('✅ Modelo de IA (Random Forest) cargado en el backend');
+ } catch (err) {
+  console.error('❌ Error cargando modelo o stats en backend:', err);
+ } // <-- "A" eliminado
 }
 loadModel(); // Llama a la función al iniciar
 
