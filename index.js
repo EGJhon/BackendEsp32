@@ -218,7 +218,12 @@ client.on('message', async (topic, payload) => {
 
     // E. TOMAR LA DECISIÓN
     let decisionFinal = "ESPERAR";
-    if (humedadFutura < parseFloat(umbrales.hum_min)) {
+    const humActual = parseFloat(humedad); // <--- Leemos la humedad actual
+    const humMinIdeal = parseFloat(umbrales.hum_min); // <--- Leemos el umbral mínimo
+
+    // --- ¡¡ESTA ES LA LÍNEA MODIFICADA!! ---
+    if (humedadFutura < humMinIdeal && humActual >= humMinIdeal) {
+    // ---------------------------------------
       decisionFinal = "REGAR_EXTRA";
     }
 
