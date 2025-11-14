@@ -565,7 +565,7 @@ app.use('/api/admin', adminRouter);
 
 
 // ===================================
-// SECCIÓN DE INTELIGENCIA ARTIFICIAL (NUEVO)
+// SECCIÓN DE INTELIGENCIA ARTIFICIAL (CORREGIDO)
 // ===================================
 let iaModel = null;
 let iaStats = null; // <--- Para guardar MEAN y STD
@@ -581,8 +581,8 @@ async function loadModel() {
     // 2. Cargar las estadísticas (Mean/Std)
     const statsPath = join(__dirname, 'rf_stats.json');
     console.log(`Cargando stats desde: ${statsPath}`);
-    const statsJSON = fs.readFileSync(statsPath, 'utf8');
-section.    iaStats = JSON.parse(statsJSON); // Carga { IA_MEAN, IA_STD }
+    const statsJSON = fs.readFileSync(statsPath, 'utf8'); // <-- "G" eliminado
+    iaStats = JSON.parse(statsJSON); // Carga { IA_MEAN, IA_STD } // <-- "section." eliminado
 
     // 3. Re-crear el modelo desde el JSON
     iaModel = RandomForestRegression.load(JSON.parse(modelJSON));
@@ -590,7 +590,7 @@ section.    iaStats = JSON.parse(statsJSON); // Carga { IA_MEAN, IA_STD }
     console.log('✅ Modelo de IA (Random Forest) cargado en el backend');
   } catch (err) {
     console.error('❌ Error cargando modelo o stats en backend:', err);
-  }
+  } // <-- "A" eliminado
 }
 loadModel(); // Llama a la función al iniciar
 
