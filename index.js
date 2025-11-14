@@ -4,6 +4,8 @@ import cors from "cors";
 import pool from "./db.js"; // conexión a PostgreSQL
 import mqtt from "mqtt";
 import admin from "firebase-admin"; // <-- NUEVO
+// --- NUEVA BIBLIOTECA DE IA ---
+import { RandomForestRegression } from 'ml-random-forest';
 // --- Inicio del bloque de reemplazo ---
 import fs from 'fs';
 import { fileURLToPath } from 'url';
