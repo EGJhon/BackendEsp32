@@ -536,42 +536,50 @@ let iaModel = null;
 
 // Cargar el modelo UNA SOLA VEZ cuando el servidor inicia
 async function loadModel() {
-  try {
-    // ¡Carga el .h5 directamente!
-    const modelPath = 'file://./generic_model_9_features.h5'; 
-    iaModel = await tf.loadLayersModel(modelPath);
-    console.log('✅ Modelo de IA cargado en el backend');
-  } catch (err) {
-    console.error('❌ Error cargando modelo en backend:', err);
-  }
+  try {
+    // ✅ Correcto: Apuntando al model.json dentro de la carpeta 'modelo_backend'
+    //    Asegúrate de que esta carpeta esté subida a Render.
+    //    Usamos 'join' y '__dirname' que ya definiste arriba.
+    const modelPath = `file://${join(__dirname, 'modelo_backend', 'model.json')}`; 
+    console.log(`Cargando modelo desde: ${modelPath}`);
+
+    iaModel = await tf.loadLayersModel(modelPath);
+    console.log('✅ Modelo de IA cargado en el backend');
+  } catch (err) {
+    console.error('❌ Error cargando modelo en backend:', err);
+  }
 }
 loadModel(); // Llama a la función al iniciar
 
 // ... en tu router (Express, etc.) ...
 app.post('/api/ia/predecir', async (req, res) => {
-  if (!iaModel) {
-    return res.status(500).send({ error: 'Modelo no está listo' });
+  if (!iaModel) {
+    return res.status(500).send({ error: 'Modelo no está listo' });
+  }
+
+  // 1. Recibir las 9 variables crudas del app.js
+  const rawInput = req.body.input; // [temp, hum, sin, cos, ...]
+
+  if (!rawInput || rawInput.length !== 9) {
+    return res.status(400).send({ error: 'Se esperaban 9 valores en el array "input"' });
   }
 
-  // 1. Recibir las 9 variables crudas del app.js
-  const rawInput = req.body.input; // [temp, hum, sin, cos, ...]
+  // 2. Normalizar (¡necesitas las constantes MEAN y STD aquí!)
+ const IA_MEAN = [19.217487787857642, 71.75930914166085, 0.0016620385105260921, 0.067683629093006, 15.149685973482205, 25.059316120027912, 69.52023726448012, 79.52023726448012,22.835387299371945];
+const IA_STD = [2.4249451811563576, 12.74868811234, 0.6839458433540213, 0.7266234840248392, 0.733345561704264, 0.4185557565303383, 2.2740148501713517, 2.2740148501713517,0.8606089852621961];
 
-  // 2. Normalizar (¡necesitas las constantes MEAN y STD aquí!)
- const IA_MEAN = [19.217487787857642, 71.75930914166085, 0.0016620385105260921, 0.067683629093006, 15.149685973482205, 25.059316120027912, 69.52023726448012, 79.52023726448012,22.835387299371945];
-const IA_STD = [2.4249451811563576, 12.748688156611234, 0.6839458433540213, 0.7266234840248392, 0.733345561704264, 0.4185557565303383, 2.2740148501713517, 2.2740148501713517,0.8606089852621961];
+  const normalizedInput = rawInput.map((val, i) => (val - IA_MEAN[i]) / IA_STD[i]);
 
-  const normalizedInput = rawInput.map((val, i) => (val - IA_MEAN[i]) / IA_STD[i]);
+  // 3. Predecir
+  const inputTensor = tf.tensor2d([normalizedInput]);
+  const prediction = iaModel.predict(inputTensor);
+  const humedadFutura = (await prediction.data())[0];
 
-  // 3. Predecir
-  const inputTensor = tf.tensor2d([normalizedInput]);
-  const prediction = iaModel.predict(inputTensor);
-  const humedadFutura = (await prediction.data())[0];
+  inputTensor.dispose();
+  prediction.dispose();
 
-  inputTensor.dispose();
-  prediction.dispose();
-
-  // 4. Devolver solo el resultado
-  res.json({ prediccion: humedadFutura });
+  // 4. Devolver solo el resultado
+  res.json({ prediccion: humedadFutura });
 });
 
 // --------------------
