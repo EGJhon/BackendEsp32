@@ -74,10 +74,8 @@ async function getWeatherForecast() {
   const lat = -12.04;
   const lon = -77.02;
 
-  if (OWM_API_KEY === "TU_API_KEY_GRATUITA_VA_AQUI") {
-    console.error("Error: Falta la API Key de OpenWeatherMap en el backend.");
-    return null;
-  }
+  OWM_API_KEY === "7a97d2cdc56d075dd74ea2a6bbd904db"
+
   const url = `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${OWM_API_KEY}&units=metric`;
   
   try {
