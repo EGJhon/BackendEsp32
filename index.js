@@ -68,64 +68,186 @@ const isAdmin = (req, res, next) => {
 };
 
 // ===================================
-// LÓGICA DE MQTT
+// FUNCIÓN DE PRONÓSTICO (¡NUEVA EN BACKEND!)
+// ===================================
+async function getWeatherForecast() {
+  const lat = -12.04;
+  const lon = -77.02;
+
+  if (OWM_API_KEY === "TU_API_KEY_GRATUITA_VA_AQUI") {
+    console.error("Error: Falta la API Key de OpenWeatherMap en el backend.");
+    return null;
+  }
+  const url = `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${OWM_API_KEY}&units=metric`;
+  
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(`Error de OpenWeatherMap: ${errorData.message}`);
+    }
+    const data = await response.json();
+    const first24Hours = data.list.slice(0, 8);
+    if (!first24Hours || first24Hours.length === 0) {
+      throw new Error("OWM no devolvió datos en la 'list'.");
+    }
+    const hourlyMaxTemps = first24Hours.map(forecast => forecast.main.temp_max);
+    const maxTemp = Math.max(...hourlyMaxTemps);
+    console.log(`(Backend) Pronóstico OWM T° Máx: ${maxTemp}°C`);
+    return maxTemp;
+  } catch (err) {
+    console.error("Error al obtener el pronóstico del tiempo (Backend):", err);
+    return null;
+  }
+}
+
+
+// ===================================
+// LÓGICA DE MQTT (¡¡MODIFICADA!!)
 // ===================================
 const MQTT_BROKER = "762358bc25e4449fb40ac5b6645ff3dc.s1.eu.hivemq.cloud";
 const MQTT_PORT = 8883;
 const MQTT_USER = "JhonE";
 const MQTT_PASSWORD = "192837465Jhon";
-const MQTT_TOPIC = "sensores/planta/datos";
+const MQTT_TOPIC_DATOS = "sensores/planta/datos"; // ESP32 publica aquí
+const MQTT_TOPIC_COMANDOS = "planta/comandos";   // ESP32 escucha aquí
 
 const mqttOptions = { 
-  host: MQTT_BROKER,
-  port: MQTT_PORT,
-  protocol: 'mqtts', // 'mqtts' para conexiones seguras TLS (puerto 8883)
-  username: MQTT_USER,
-  password: MQTT_PASSWORD};
+  host: MQTT_BROKER,
+  port: MQTT_PORT,
+  protocol: 'mqtts',
+  username: MQTT_USER,
+  password: MQTT_PASSWORD
+};
 const client = mqtt.connect(mqttOptions);
+
 client.on('connect', () => {
-  console.log('✅ Conectado exitosamente al Broker MQTT');
-  
-  // Suscribirse al topic
-  client.subscribe(MQTT_TOPIC, (err) => {
-    if (!err) {
-      console.log(`👂 Suscrito al topic: ${MQTT_TOPIC}`);
-    } else {
-      console.error('Error al suscribirse:', err);
-    }
-  });});
+  console.log('✅ Conectado exitosamente al Broker MQTT');
+  // El backend ahora SÓLO escucha el topic de datos
+  client.subscribe(MQTT_TOPIC_DATOS, (err) => {
+    if (!err) {
+      console.log(`👂 Suscrito al topic: ${MQTT_TOPIC_DATOS}`);
+    } else {
+      console.error('Error al suscribirse:', err);
+    }
+  });
+});
+
+// ¡¡ESTA ES LA LÓGICA PRINCIPAL!!
 client.on('message', async (topic, payload) => { 
-  const messageString = payload.toString();
-    console.log(`[MQTT] Mensaje recibido en ${topic}: ${messageString}`);
+  const messageString = payload.toString();
+  console.log(`[MQTT] Mensaje recibido en ${topic}: ${messageString}`);
   
+  let datos;
+  try {
+    datos = JSON.parse(messageString);
+  } catch (error) {
+    console.error("[MQTT] Error: Mensaje JSON malformado:", messageString);
+    return; // Salir si el JSON es inválido
+  }
+
+  const { planta_id, temperatura, humedad, nivel_agua, agua_consumida } = datos;
+
+  // --- 1. Guardar en la Base de Datos (Lógica existente) ---
+  if (planta_id && temperatura !== undefined && humedad !== undefined) {
     try {
-      // Convertimos el string (que es un JSON) a un objeto
-      const datos = JSON.parse(messageString);
-  
-      const { planta_id, temperatura, humedad, nivel_agua, agua_consumida } = datos;
-  
-      // --- Esta es la MISMA lógica que tu ruta POST ---
       const query = `
         INSERT INTO lecturas (planta_id, temperatura, humedad, nivel_agua, agua_consumida, fecha)
         VALUES ($1, $2, $3, $4, $5, NOW())
         RETURNING *;
       `;
       const values = [planta_id, temperatura, humedad, nivel_agua || null, agua_consumida || null];
-      
-      // Ejecutamos la consulta
       const result = await pool.query(query, values);
       console.log('[MQTT] Datos guardados en la BD:', result.rows[0]);
-  
     } catch (error) {
-      console.error("[MQTT] Error al procesar el mensaje o guardar en BD:", error);
+      console.error("[MQTT] Error al guardar en BD:", error);
     }
+  } else {
+    console.warn("[MQTT] Mensaje recibido sin datos completos para guardar en BD.");
+  }
+
+
+  // --- 2. Lógica de Decisión de IA (¡NUEVO!) ---
+  // Asegurarse de que el modelo y los datos básicos están listos
+  if (!iaModel || !iaStats || !planta_id || temperatura === undefined || humedad === undefined) {
+    console.log("[IA] Omitiendo decisión: Faltan datos (planta_id, temp, hum) o el modelo no está listo.");
+    return;
+  }
+
+  try {
+    // A. OBTENER UMBRALES
+    const queryUmbrales = `
+      SELECT T.temp_min, T.temp_max, T.hum_min, T.hum_max
+      FROM tipo_planta T
+      JOIN plantas P ON T.id = P.id_tipo
+      WHERE P.id = $1;
+    `;
+    const umbralesResult = await pool.query(queryUmbrales, [planta_id]);
+    if (umbralesResult.rows.length === 0) {
+      console.error(`[IA] No se encontraron umbrales para planta_id: ${planta_id}`);
+      return;
+    }
+    const umbrales = umbralesResult.rows[0];
+
+    // B. OBTENER PRONÓSTICO DEL TIEMPO
+    const forecastedMaxTemp = await getWeatherForecast(); // Usar la función que añadimos
+    if (forecastedMaxTemp === null) {
+      console.error("[IA] No se pudo obtener el pronóstico del tiempo.");
+      return;
+    }
+
+    // C. PREPARAR DATOS PARA LA IA (Las 9 variables)
+    const rawInput = [
+      parseFloat(temperatura),
+      parseFloat(humedad),
+      Math.sin(2 * Math.PI * new Date().getHours() / 23.0),
+      Math.cos(2 * Math.PI * new Date().getHours() / 23.0),
+      parseFloat(umbrales.temp_min),
+      parseFloat(umbrales.temp_max),
+      parseFloat(umbrales.hum_min),
+      parseFloat(umbrales.hum_max),
+      parseFloat(forecastedMaxTemp)
+    ];
+
+    // D. EJECUTAR PREDICCIÓN
+    const { IA_MEAN, IA_STD } = iaStats;
+    const normalizedInput = rawInput.map((val, i) => {
+        if (IA_STD[i] === 0 || isNaN(IA_STD[i])) return val - IA_MEAN[i];
+        return (val - IA_MEAN[i]) / IA_STD[i];
+    });
+    const prediction = iaModel.predict([normalizedInput]);
+    const humedadFutura = prediction[0];
+
+    // E. TOMAR LA DECISIÓN
+    let decisionFinal = "ESPERAR";
+    if (humedadFutura < parseFloat(umbrales.hum_min)) {
+      decisionFinal = "REGAR_EXTRA";
+    }
+
+    // F. PUBLICAR COMANDO DE VUELTA AL ESP32
+    if (decisionFinal === "REGAR_EXTRA") {
+      // Publicamos en un topic específico para esa planta
+      const commandTopic = `${MQTT_TOPIC_COMANDOS}/${planta_id}`;
+      const commandMessage = "REGAR"; // Mensaje simple
+      
+      client.publish(commandTopic, commandMessage, (err) => {
+        if (err) {
+          console.error(`[MQTT] Error al publicar comando en ${commandTopic}:`, err);
+        } else {
+          console.log(`[IA] ¡Orden ${commandMessage} enviada a ${commandTopic}! (Futuro: ${humedadFutura.toFixed(1)}%)`);
+        }
+      });
+    } else {
+        console.log(`[IA] Decisión para ${planta_id}: ESPERAR (Futuro: ${humedadFutura.toFixed(1)}%)`);
+    }
+
+  } catch (error) {
+    console.error(`[IA] Error fatal en la lógica de decisión para ${planta_id}:`, error.message);
+  }
 });
-client.on('error', (err) => { 
-  console.error('Error de MQTT:', err);
-  });
-client.on('reconnect', () => { 
-  console.log('Reconectando al Broker MQTT...');
-  });
+
+client.on('error', (err) => { console.error('Error de MQTT:', err); });
+client.on('reconnect', () => { console.log('Reconectando al Broker MQTT...'); });
 
 // ===================================
 // RUTAS PÚBLICAS (No requieren login)
