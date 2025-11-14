@@ -427,7 +427,7 @@ userRouter.post('/ia/predecir', async (req, res) => {
     return res.status(400).send({ error: 'Se esperaban 9 valores en el array "input"' });
   }
 
-s
+
   // 2. Normalizar (Usando los stats cargados)
   const { IA_MEAN, IA_STD } = iaStats;
   const normalizedInput = rawInput.map((val, i) => {
