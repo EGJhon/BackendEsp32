@@ -1,5 +1,4 @@
 import express from "express";
-import tf from '@tensorflow/tfjs-node';
 import bodyParser from "body-parser";
 import cors from "cors";
 import pool from "./db.js"; // conexión a PostgreSQL
@@ -410,12 +409,44 @@ userRouter.get("/sensores/ultimo", async (req, res) => {
  });
 
 
+// ===================================
+// RUTA DE PREDICCIÓN DE IA (NUEVO)
+// ===================================
+userRouter.post('/ia/predecir', async (req, res) => {
+  // iaModel e iaStats se cargan más abajo
+  if (!iaModel || !iaStats) { 
+    return res.status(500).send({ error: 'Modelo no está listo' });
+  }
 
+  // 1. Recibir las 9 variables crudas
+  const rawInput = req.body.input; // [temp, hum, sin, cos, ...]
+
+  if (!rawInput || rawInput.length !== 9) {
+    return res.status(400).send({ error: 'Se esperaban 9 valores en el array "input"' });
+  }
+
+s
+  // 2. Normalizar (Usando los stats cargados)
+  const { IA_MEAN, IA_STD } = iaStats;
+  const normalizedInput = rawInput.map((val, i) => {
+    // Evitar división por cero si la desviación es 0
+    if (IA_STD[i] === 0 || isNaN(IA_STD[i])) return val - IA_MEAN[i];
+    return (val - IA_MEAN[i]) / IA_STD[i];
+  });
+
+  // 3. Predecir
+  const prediction = iaModel.predict([normalizedInput]);
+  const humedadFutura = prediction[0];
+
+  // 4. Devolver solo el resultado
+  res.json({ prediccion: humedadFutura });
+});
 
 
 
 // Conectamos el router de usuario a la app
 app.use('/api', userRouter);
+
 
 // ===================================
 // RUTAS DE ADMINISTRADOR (PARTE 2)
@@ -531,56 +562,35 @@ adminRouter.delete('/lecturas/:id', async (req, res) => {
 app.use('/api/admin', adminRouter);
 
 
-// Importar TF-Node y el modelo
+// ===================================
+// SECCIÓN DE INTELIGENCIA ARTIFICIAL (NUEVO)
+// ===================================
 let iaModel = null;
+let iaStats = null; // <--- Para guardar MEAN y STD
 
 // Cargar el modelo UNA SOLA VEZ cuando el servidor inicia
 async function loadModel() {
   try {
-    // ✅ Correcto: Apuntando al model.json dentro de la carpeta 'modelo_backend'
-    //    Asegúrate de que esta carpeta esté subida a Render.
-    //    Usamos 'join' y '__dirname' que ya definiste arriba.
-    const modelPath = `file://${join(__dirname, 'modelo_backend', 'model.json')}`; 
-    console.log(`Cargando modelo desde: ${modelPath}`);
+    // 1. Cargar el JSON del modelo
+    const modelPath = join(__dirname, 'rf_model.json'); 
+    console.log(`Cargando modelo desde: ${modelPath}`);
+    const modelJSON = fs.readFileSync(modelPath, 'utf8');
+    
+    // 2. Cargar las estadísticas (Mean/Std)
+    const statsPath = join(__dirname, 'rf_stats.json');
+    console.log(`Cargando stats desde: ${statsPath}`);
+    const statsJSON = fs.readFileSync(statsPath, 'utf8');
+section.    iaStats = JSON.parse(statsJSON); // Carga { IA_MEAN, IA_STD }
 
-    iaModel = await tf.loadLayersModel(modelPath);
-    console.log('✅ Modelo de IA cargado en el backend');
+    // 3. Re-crear el modelo desde el JSON
+    iaModel = RandomForestRegression.load(JSON.parse(modelJSON));
+    
+    console.log('✅ Modelo de IA (Random Forest) cargado en el backend');
   } catch (err) {
-    console.error('❌ Error cargando modelo en backend:', err);
-  }
+    console.error('❌ Error cargando modelo o stats en backend:', err);
+  }
 }
 loadModel(); // Llama a la función al iniciar
-
-// ... en tu router (Express, etc.) ...
-app.post('/api/ia/predecir', async (req, res) => {
-  if (!iaModel) {
-    return res.status(500).send({ error: 'Modelo no está listo' });
-  }
-
-  // 1. Recibir las 9 variables crudas del app.js
-  const rawInput = req.body.input; // [temp, hum, sin, cos, ...]
-
-  if (!rawInput || rawInput.length !== 9) {
-    return res.status(400).send({ error: 'Se esperaban 9 valores en el array "input"' });
-  }
-
-  // 2. Normalizar (¡necesitas las constantes MEAN y STD aquí!)
- const IA_MEAN = [19.217487787857642, 71.75930914166085, 0.0016620385105260921, 0.067683629093006, 15.149685973482205, 25.059316120027912, 69.52023726448012, 79.52023726448012,22.835387299371945];
-const IA_STD = [2.4249451811563576, 12.74868811234, 0.6839458433540213, 0.7266234840248392, 0.733345561704264, 0.4185557565303383, 2.2740148501713517, 2.2740148501713517,0.8606089852621961];
-
-  const normalizedInput = rawInput.map((val, i) => (val - IA_MEAN[i]) / IA_STD[i]);
-
-  // 3. Predecir
-  const inputTensor = tf.tensor2d([normalizedInput]);
-  const prediction = iaModel.predict(inputTensor);
-  const humedadFutura = (await prediction.data())[0];
-
-  inputTensor.dispose();
-  prediction.dispose();
-
-  // 4. Devolver solo el resultado
-  res.json({ prediccion: humedadFutura });
-});
 
 // --------------------
 // Iniciar servidor
