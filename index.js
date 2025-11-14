@@ -74,7 +74,7 @@ async function getWeatherForecast() {
   const lat = -12.04;
   const lon = -77.02;
 
-  OWM_API_KEY === "7a97d2cdc56d075dd74ea2a6bbd904db"
+  const OWM_API_KEY = "7a97d2cdc56d075dd74ea2a6bbd904db"; 
 
   const url = `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${OWM_API_KEY}&units=metric`;
   
