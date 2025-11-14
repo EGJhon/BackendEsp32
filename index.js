@@ -1,4 +1,5 @@
 import express from "express";
+import tf from '@tensorflow/tfjs-node';
 import bodyParser from "body-parser";
 import cors from "cors";
 import pool from "./db.js"; // conexión a PostgreSQL
@@ -531,7 +532,6 @@ app.use('/api/admin', adminRouter);
 
 
 // Importar TF-Node y el modelo
-const tf = require('@tensorflow/tfjs-node');
 let iaModel = null;
 
 // Cargar el modelo UNA SOLA VEZ cuando el servidor inicia
